@@ -1,9 +1,0 @@
-int8 CAPTURE = 0
-int8 CALIBRATE = 1
-int8 VERIFY = 2
-int8 RESET = 3
-int8 SAVE = 4
-
-int8 action
----
-bool success

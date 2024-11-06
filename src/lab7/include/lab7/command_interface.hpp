@@ -2,18 +2,18 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include "lab7/srv/hand_eye_calib.hpp"
+#include "lab7/srv/capture_measurements.hpp"
 
 class Lab7CommandInterface : public rclcpp::Node {
 
 public:
   Lab7CommandInterface();
-  void sendHandEyeCalibRequest(const lab7::srv::HandEyeCalib::Request::SharedPtr& request);
+  void sendCaptureMeasurementsRequest(const lab7::srv::CaptureMeasurements::Request::SharedPtr& request);
   void stopNode() {rclcpp::shutdown();}
 
 private:
-  bool hand_eye_calib_service_available_ {false};
+  bool is_capture_measurements_service_available_ {false};
 
-  rclcpp::Client<lab7::srv::HandEyeCalib>::SharedPtr hand_eye_calib_client_ {nullptr};
+  rclcpp::Client<lab7::srv::CaptureMeasurements>::SharedPtr capture_measurements_client_ {nullptr};
 
 };

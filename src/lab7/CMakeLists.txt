@@ -33,11 +33,13 @@ foreach(dependency IN ITEMS ${CORE_DEPENDENCIES} ${HAND_EYE_CALIB_DEPS})
 endforeach()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "srv/HandEyeCalib.srv"
+  "msg/Status.msg"
+  "srv/CaptureMeasurements.srv"
 )
 
 add_executable(hand_eye_calib
-  src/lab7.cpp
+  src/measurements.cpp
+  # src/lab7.cpp
   src/hand_eye_calib.cpp
 )
 ament_target_dependencies(hand_eye_calib "${CORE_DEPENDENCIES}" "${HAND_EYE_CALIB_DEPS}")

@@ -1,8 +1,9 @@
 #include <filesystem>
 #include <fstream>
 
-#include <opencv2/core.hpp>
+// #include <opencv2/core.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/core/affine.hpp>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
@@ -13,18 +14,25 @@ HandEyeCalibNode::HandEyeCalibNode()
 {
   using namespace std::chrono_literals;
 
-  timer_ = this->create_wall_timer(500ms, std::bind(&HandEyeCalibNode::timerCallback, this));
+  general_timer_ =
+    this->create_wall_timer(500ms, std::bind(&HandEyeCalibNode::generalTimerCallback, this));
+
+  measurements_capture_timer_ =
+    this->create_wall_timer(250ms, std::bind(&HandEyeCalibNode::measurementsCaptureTimerCallback, this));
+
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
-  tf_static_broadcaster_ = std::make_unique<tf2_ros::StaticTransformBroadcaster>(this);
+  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
 
   marker_pose_sub_ = this->create_subscription<aruco_opencv_msgs::msg::ArucoDetection>(
     "aruco_detections", 10,
-    std::bind(&HandEyeCalibNode::getEndEffector2CameraFrame, this, std::placeholders::_1));
+    std::bind(&HandEyeCalibNode::arucoDetectionsSubscriptionCallback, this, std::placeholders::_1));
 
-  hand_eye_calib_service_ = this->create_service<lab7::srv::HandEyeCalib>(
-    "hand_eye_calib",
-    std::bind(&HandEyeCalibNode::serviceCallback, this, std::placeholders::_1, std::placeholders::_2));
+  capture_measurements_service_ = this->create_service<lab7::srv::CaptureMeasurements>(
+    "capture_measurements",
+    std::bind(
+      &HandEyeCalibNode::captureMeasurementsServiceCallback, this,
+      std::placeholders::_1, std::placeholders::_2));
 
   auto param_description {rcl_interfaces::msg::ParameterDescriptor()};
 
@@ -43,6 +51,12 @@ HandEyeCalibNode::HandEyeCalibNode()
   param_description.description = "Minimum number of measurements for calibration";
   this->declare_parameter("measurements_required", 15, param_description);
 
+  param_description.description = "Threshold in meters for linear displacement in any of the axes";
+  this->declare_parameter("linear_displacement_threshold", 0.1, param_description);
+
+  param_description.description = "Threshold in degrees for angular displacement in any of the axes";
+  this->declare_parameter("angular_displacement_threshold", 45, param_description);
+
   workspace_dir_ = this->get_parameter("workspace_dir").as_string();
 
   if (!std::filesystem::is_directory(workspace_dir_)) {
@@ -52,65 +66,124 @@ HandEyeCalibNode::HandEyeCalibNode()
     rclcpp::shutdown();
   }
 
-  robot_base_frame_ = this->get_parameter("robot_base_frame").as_string();
-  robot_eef_frame_ = this->get_parameter("robot_eef_frame").as_string();
+  if (!std::filesystem::is_directory(workspace_dir_ + "/output/lab7"))
+    std::filesystem::create_directories(workspace_dir_ + "/output/lab7");
+
+  robot_base_frame_name_ = this->get_parameter("robot_base_frame").as_string();
+  robot_eef_frame_name_ = this->get_parameter("robot_eef_frame").as_string();
+  target_marker_id_ = this->get_parameter("marker_id").as_int();
+  measurements_required_ = this->get_parameter("measurements_required").as_int();
+
+  double lin_disp_thld {this->get_parameter("linear_displacement_threshold").as_double()};
+  double ang_disp_thld {this->get_parameter("angular_displacement_threshold").as_double()};
+
+  if (lin_disp_thld <= 0.0 || ang_disp_thld <= 0.0) {
+    RCLCPP_FATAL_STREAM(
+      this->get_logger(), "Thresholds for capturing measurements can't be set to zero or negative.");
+
+    rclcpp::shutdown();
+  }
+
+  calibration_measurements_.setCaptureThresholds(lin_disp_thld, ang_disp_thld);
+  calibration_check_measurements_.setCaptureThresholds(lin_disp_thld, ang_disp_thld);
 
   RCLCPP_INFO(this->get_logger(), "Hand-Eye Calibration node initialized.");
 }
 
-void HandEyeCalibNode::timerCallback()
+void HandEyeCalibNode::generalTimerCallback()
 {
-  marker_id_ = this->get_parameter("marker_id").as_int();
+  // getBase2EndEffectorFrame();
+  // broadcastBase2CameraFrame();
 
-  getBase2EndEffectorFrame();
-  broadcastBase2CameraFrame();
+  if (!is_calibration_complete_ && captured_calibration_measurements_) {
+    RCLCPP_INFO_STREAM(this->get_logger(), "Measurements for calibration captured successfully...");
+
+    is_calibration_complete_ = calibrateHandEye(calibration_measurements_, camera_pose_robot_base_);
+
+    if (is_calibration_complete_) {
+
+      std::string output_file_name {
+        workspace_dir_ + "/output/lab7/Calibration-" + createTimeStamp()};
+
+      std::ofstream output_file_txt {output_file_name + ".txt"};
+      saveCalibrationOutput(output_file_txt, camera_pose_robot_base_);
+
+      /**
+       * Automatically pauses after calibration to capture the next set of measurements for checking
+       * the calibration result. Should manually send another service request to start capturing the
+       * next set of measurements.
+       */
+
+      should_capture_measurements_ = false;
+    }
+  }
+
+  if (is_calibration_complete_) {
+    broadcastFrameCamera_RobotBase(camera_pose_robot_base_);
+  }
+
+  if (captured_calibration_measurements_ && !saved_calibration_check_measurements_) {
+    RCLCPP_INFO_STREAM(this->get_logger(), "Measurements for calibration check captured successfully");
+    RCLCPP_INFO_STREAM(this->get_logger(), "Saving the measurements...");
+
+    std::string output_file_name {
+      workspace_dir_ + "/output/lab7/Calibration-Check-Measurements-" + createTimeStamp()};
+
+    cv::FileStorage output_file_yaml {output_file_name + ".yaml", cv::FileStorage::WRITE};
+    calibration_check_measurements_.writeMeasurements(output_file_yaml);
+
+    saved_calibration_check_measurements_ = true;
+    should_capture_measurements_ = false;
+
+    RCLCPP_INFO_STREAM(this->get_logger(), "All measurements captured successfully.");
+  }
+
 }
 
-void HandEyeCalibNode::serviceCallback(
-  const std::shared_ptr<lab7::srv::HandEyeCalib::Request> request,
-  std::shared_ptr<lab7::srv::HandEyeCalib::Response> response)
+void HandEyeCalibNode::measurementsCaptureTimerCallback()
+{
+  if (!is_calibration_complete_ && should_capture_measurements_) {
+    captured_calibration_measurements_ = captureCalibrationMeasurements(calibration_measurements_);
+  }
+
+  else if (!is_calibration_complete_
+          && !should_capture_measurements_
+          && calibration_measurements_.getNumberOfMeasurements() != 0) {
+    calibration_measurements_.clearMeasurements();
+
+    RCLCPP_INFO_STREAM(this->get_logger(), "Cancelled capturing calibration measurements.");
+  }
+
+  if (is_calibration_complete_ && should_capture_measurements_) {
+    captured_calibration_check_measurements_ =
+      captureCalibrationCheckMeasurements(calibration_check_measurements_);
+  }
+
+  else if (is_calibration_complete_
+          && !should_capture_measurements_
+          && calibration_check_measurements_.getNumberOfMeasurements() != 0) {
+    calibration_check_measurements_.clearMeasurements();
+
+    RCLCPP_INFO_STREAM(this->get_logger(), "Cancelled capturing calibration check measurements.");
+  }
+}
+
+void HandEyeCalibNode::captureMeasurementsServiceCallback(
+  const std::shared_ptr<lab7::srv::CaptureMeasurements::Request> request,
+  std::shared_ptr<lab7::srv::CaptureMeasurements::Response> response)
 {
   switch (request->action) {
 
-  case (lab7::srv::HandEyeCalib::Request::CAPTURE):
-    if (!is_calibration_complete_)
-      captureCalibrationMeasure();
-    else
-      captureVerificationMeasure();
-
+  case (lab7::srv::CaptureMeasurements::Request::START):
+    should_capture_measurements_ = true;
     break;
 
-  case (lab7::srv::HandEyeCalib::Request::CALIBRATE):
-    calibrateHandEye();
-
-    if (!is_calibration_complete_) {
-      response->set__success(false);
-
-      return;
-    }
-
+  case (lab7::srv::CaptureMeasurements::Request::CANCEL):
+    should_capture_measurements_ = false;
     break;
 
-  case (lab7::srv::HandEyeCalib::Request::VERIFY):
-    verifyCalibration();
-
-    if (!is_verification_complete_) {
-      response->set__success(false);
-
-      return;
-    }
-
-    break;
-
-  case (lab7::srv::HandEyeCalib::Request::RESET):
+  case (lab7::srv::CaptureMeasurements::Request::RESET):
     resetMeasurements();
-    break;
-
-  case (lab7::srv::HandEyeCalib::Request::SAVE):
-    if (!is_verification_complete_)
-      saveCalibrationOutput();
-    else
-      saveVerificationOutput();
     break;
 
   default:
@@ -124,224 +197,290 @@ void HandEyeCalibNode::serviceCallback(
 
 void HandEyeCalibNode::resetMeasurements()
 {
-  base2eef_frame_tvecs_.clear();
-  base2eef_frame_rmatxs_.clear();
-  cam2eef_frame_tvecs_.clear();
-  cam2eef_frame_rmatxs_.clear();
+  // base2eef_frame_tvecs_.clear();
+  // base2eef_frame_rmatxs_.clear();
+  // cam2eef_frame_tvecs_.clear();
+  // cam2eef_frame_rmatxs_.clear();
 
-  estimated_eef_positions_.clear();
-  actual_eef_positions_.clear();
-  estimated_eef_orientations_.clear();
-  actual_eef_orientations_.clear();
+  // estimated_eef_positions_.clear();
+  // actual_eef_positions_.clear();
+  // estimated_eef_orientations_.clear();
+  // actual_eef_orientations_.clear();
 
-  measures_captured_quantity_ = 0;
-
+  calibration_measurements_.clearMeasurements();
+  calibration_check_measurements_.clearMeasurements();
+  camera_pose_robot_base_.setIdentity();
   is_calibration_complete_ = false;
+  should_capture_measurements_ = false;
 
   RCLCPP_INFO(this->get_logger(), "Measurements have been reset, you can start over now.");
 }
 
-void HandEyeCalibNode::getBase2EndEffectorFrame()
+bool HandEyeCalibNode::getPoseEndEffector_RobotBase(Eigen::Affine3d& pose_out)
 {
+  pose_out.setIdentity();
+  geometry_msgs::msg::Transform base2eef_transform {};
+
   try {
-    base2eef_transform_ =
+    base2eef_transform =
       tf_buffer_->lookupTransform(
-        robot_eef_frame_, robot_base_frame_, tf2::TimePointZero).transform;
+        robot_eef_frame_name_, robot_base_frame_name_, tf2::TimePointZero).transform;
   }
   catch (const tf2::TransformException& ex) {
     RCLCPP_WARN_STREAM(
       this->get_logger(),
-      "Tried to transform " << robot_base_frame_ << " to " << robot_eef_frame_  << " : "
+      "Tried to transform " << robot_base_frame_name_ << " to " << robot_eef_frame_name_  << " : "
                             << ex.what());
 
-    is_base2eef_frame_available_ = false;
-
-    return;
+    return false;
   }
 
   Eigen::Vector3d translation {
-    base2eef_transform_.translation.x,
-    base2eef_transform_.translation.y,
-    base2eef_transform_.translation.z};
+    base2eef_transform.translation.x,
+    base2eef_transform.translation.y,
+    base2eef_transform.translation.z};
 
   Eigen::Quaterniond rotation {
-    base2eef_transform_.rotation.w,
-    base2eef_transform_.rotation.x,
-    base2eef_transform_.rotation.y,
-    base2eef_transform_.rotation.z};
+    base2eef_transform.rotation.w,
+    base2eef_transform.rotation.x,
+    base2eef_transform.rotation.y,
+    base2eef_transform.rotation.z};
 
   rotation.normalize();
 
-  base2eef_frame_.translation() = translation;
-  base2eef_frame_.matrix().topLeftCorner<3, 3>() = rotation.toRotationMatrix();
+  pose_out.translation() = translation;
+  pose_out.matrix().topLeftCorner<3, 3>() = rotation.toRotationMatrix();
 
-  is_base2eef_frame_available_ = true;
+  return true;
 }
 
-void HandEyeCalibNode::getEndEffector2CameraFrame(const aruco_opencv_msgs::msg::ArucoDetection& msg)
+void HandEyeCalibNode::arucoDetectionsSubscriptionCallback(
+  const aruco_opencv_msgs::msg::ArucoDetection& msg)
 {
-  for (const auto& marker_pose: msg.markers) {
-    if (marker_pose.marker_id != marker_id_)
+  detected_markers_ = msg;
+}
+
+bool HandEyeCalibNode::getPoseMarker_Camera(Eigen::Affine3d& pose_out)
+{
+  pose_out.setIdentity();
+  geometry_msgs::msg::Transform base2marker_transform {};
+  std::string marker_frame {"marker_" + std::to_string(target_marker_id_)};
+
+  try {
+    base2marker_transform =
+      tf_buffer_->lookupTransform(
+        marker_frame, robot_base_frame_name_, tf2::TimePointZero).transform;
+  }
+  catch (const tf2::TransformException& ex) {
+    RCLCPP_WARN_STREAM(
+      this->get_logger(),
+      "Tried to transform " << marker_frame << " to " << robot_eef_frame_name_  << " : "
+                            << ex.what());
+
+    return false;
+  }
+
+  Eigen::Vector3d translation {
+    base2marker_transform.translation.x,
+    base2marker_transform.translation.y,
+    base2marker_transform.translation.z};
+
+  Eigen::Quaterniond rotation {
+    base2marker_transform.rotation.w,
+    base2marker_transform.rotation.x,
+    base2marker_transform.rotation.y,
+    base2marker_transform.rotation.z};
+
+  rotation.normalize();
+
+  pose_out.translation() = translation;
+  pose_out.matrix().topLeftCorner<3, 3>() = rotation.toRotationMatrix();
+
+  return true;
+}
+
+bool HandEyeCalibNode::getPoseMarker_RobotBase(Eigen::Affine3d& pose_out)
+{
+  pose_out.setIdentity();
+
+  for (const auto& marker: detected_markers_.markers) {
+    if (marker.marker_id != target_marker_id_)
       continue;
 
-    cam2eef_pose_ = marker_pose.pose;
+    Eigen::Vector3d marker_position {
+      marker.pose.position.x,
+      marker.pose.position.y,
+      marker.pose.position.z};
 
-    Eigen::Vector3d translation {
-      cam2eef_pose_.position.x,
-      cam2eef_pose_.position.y,
-      cam2eef_pose_.position.z};
+    Eigen::Quaterniond marker_orientation {
+      marker.pose.orientation.w,
+      marker.pose.orientation.x,
+      marker.pose.orientation.y,
+      marker.pose.orientation.z};
 
-    Eigen::Quaterniond rotation {
-      cam2eef_pose_.orientation.w,
-      cam2eef_pose_.orientation.x,
-      cam2eef_pose_.orientation.y,
-      cam2eef_pose_.orientation.z};
+    marker_orientation.normalize();
 
-    rotation.normalize();
+    pose_out.translation() = marker_position;
+    pose_out.matrix().topLeftCorner<3, 3>() = marker_orientation.toRotationMatrix();
 
-    cam2eef_frame_.translation() = translation;
-    cam2eef_frame_.matrix().topLeftCorner<3, 3>() = rotation.toRotationMatrix();
-
-    is_cam2eef_frame_available_ = true;
-
-    return;
+    return true;
   }
 
-  is_cam2eef_frame_available_ = false;
+  return false;
 }
 
-void HandEyeCalibNode::captureCalibrationMeasure()
+bool HandEyeCalibNode::captureCalibrationMeasurements(Measurements::Calibration& measurements_out)
 {
-  if (!is_base2eef_frame_available_ || !is_cam2eef_frame_available_) {
-    RCLCPP_WARN(
-      this->get_logger(),
-      "Measure capture failed: One/Both of the frames is unavailable, try again.");
+  if (measurements_out.getNumberOfMeasurements() >= measurements_required_)
+    return true;
 
-    return;
-  }
+  Eigen::Affine3d eef_pose_robot_base {Eigen::Affine3d::Identity()};
+  Eigen::Affine3d eef_pose_camera {Eigen::Affine3d::Identity()};
 
-  cv::Affine3d base2eef_frame_mat {};
-  cv::eigen2cv(base2eef_frame_.matrix(), base2eef_frame_mat.matrix);
+  bool got_eef_pose_robot_base {getPoseEndEffector_RobotBase(eef_pose_robot_base)};
 
-  cv::Affine3d cam2eef_frame_mat {};
-  cv::eigen2cv(cam2eef_frame_.matrix(), cam2eef_frame_mat.matrix);
+  /**
+   * Marker is mounted on the end-effector so both these poses are treated as same.
+   */
 
-  base2eef_frame_tvecs_.emplace_back(base2eef_frame_mat.translation());
-  base2eef_frame_rmatxs_.emplace_back(base2eef_frame_mat.rotation());
+  bool got_eef_pose_camera {getPoseMarker_Camera(eef_pose_camera)};
 
-  cam2eef_frame_tvecs_.emplace_back(cam2eef_frame_mat.translation());
-  cam2eef_frame_rmatxs_.emplace_back(cam2eef_frame_mat.rotation());
+  if (!got_eef_pose_robot_base || !got_eef_pose_camera)
+    return false;
 
-  measures_captured_quantity_++;
+  bool is_captured {measurements_out.addMeasurement(eef_pose_robot_base, eef_pose_camera)};
 
-  RCLCPP_INFO(this->get_logger(), "Measure captured successfully.");
-  RCLCPP_INFO_STREAM(this->get_logger(), "Measures captured: " << measures_captured_quantity_);
+  if (!is_captured)
+    return false;
+
+  std::stringstream info_stream {};
+  info_stream << "Calibration measurement captured, "
+              << "measurements remaining: "
+              << measurements_required_ - measurements_out.getNumberOfMeasurements() << '\n';
+
+  RCLCPP_INFO_STREAM(this->get_logger(), info_stream.str());
+
+  return false;
 }
 
-void HandEyeCalibNode::captureVerificationMeasure()
+bool HandEyeCalibNode::captureCalibrationCheckMeasurements(
+  Measurements::CalibrationCheck& measurements_out)
 {
   if (!is_calibration_complete_) {
     RCLCPP_WARN(
       this->get_logger(),
       "Calibration needs to be done first before capturing measures for verification.");
 
-    return;
+    return false;
   }
 
-  if (!is_base2eef_frame_available_ || !is_cam2eef_frame_available_) {
-    RCLCPP_WARN(
-      this->get_logger(),
-      "Measure capture failed: One/Both of the frames is unavailable, try again.");
+  if (measurements_out.getNumberOfMeasurements() >= measurements_required_)
+    return true;
 
-    return;
-  }
+  Eigen::Affine3d estimated_eef_pose {Eigen::Affine3d::Identity()};
+  Eigen::Affine3d measured_eef_pose {Eigen::Affine3d::Identity()};
 
-  auto estimated_eef_pose {base2cam_frame_ * cam2eef_frame_};
+  /**
+   * Marker is mounted on the end-effector so both these poses are treated as same.
+   */
 
-  estimated_eef_positions_.emplace_back(estimated_eef_pose.translation());
-  estimated_eef_orientations_.emplace_back(estimated_eef_pose.rotation());
+  bool got_estimated_eef_pose {getPoseMarker_RobotBase(estimated_eef_pose)};
+  bool got_measured_eef_pose {getPoseEndEffector_RobotBase(measured_eef_pose)};
 
-  actual_eef_positions_.emplace_back(base2eef_frame_.translation());
-  actual_eef_orientations_.emplace_back(base2eef_frame_.rotation());
+  if (!got_estimated_eef_pose || !got_measured_eef_pose)
+    return false;
 
-  measures_captured_quantity_++;
+  bool is_captured {measurements_out.addMeasurement(estimated_eef_pose, measured_eef_pose)};
 
-  RCLCPP_INFO(this->get_logger(), "Measure captured successfully.");
-  RCLCPP_INFO_STREAM(this->get_logger(), "Measures captured: " << measures_captured_quantity_);
+  if (!is_captured)
+    return false;
+
+  std::stringstream info_stream {};
+  info_stream << "Calibration check measurement captured, "
+              << "measurements remaining: "
+              << measurements_required_ - measurements_out.getNumberOfMeasurements() << '\n';
+
+  RCLCPP_INFO_STREAM(this->get_logger(), info_stream.str());
+
+  return false;
 }
 
-void HandEyeCalibNode::calibrateHandEye()
+bool HandEyeCalibNode::calibrateHandEye(
+  const Measurements::Calibration& measurements_in,
+  Eigen::Affine3d& pose_out)
 {
-  int required_measures = this->get_parameter("measurements_required").as_int();
+  pose_out.setIdentity();
 
-  if (measures_captured_quantity_ < required_measures) {
+  if (measurements_in.getNumberOfMeasurements() < measurements_required_) {
     RCLCPP_WARN(this->get_logger(), "Calibration failed: Insufficient measurements.");
-    RCLCPP_INFO_STREAM(
-      this->get_logger(),
-      "Get " << required_measures - measures_captured_quantity_ << " more measurements and try again.");
 
-    is_calibration_complete_ = false;
+    std::stringstream info_stream {};
+    info_stream << "Get "
+                << measurements_required_ - measurements_in.getNumberOfMeasurements()
+                << " more measurements and try again.";
 
-    return;
+    RCLCPP_INFO_STREAM(this->get_logger(), info_stream.str());
+
+    return false;
   }
 
   RCLCPP_INFO(this->get_logger(), "Calibrating... This might take some while.");
 
-  cv::Mat base2cam_rotation_matrix {};
-  cv::Vec3d base2cam_translation_vector {};
+  cv::Mat camera_rotation_matrix {};
+  cv::Vec3d camera_translation_vector {};
 
   try {
     cv::calibrateHandEye(
-      base2eef_frame_rmatxs_, base2eef_frame_tvecs_,
-      cam2eef_frame_rmatxs_, cam2eef_frame_tvecs_,
-      base2cam_rotation_matrix, base2cam_translation_vector,
+      measurements_in.getCVRotationMatricesEEF_RobotBase(),
+      measurements_in.getCVTranslationVectorsEEF_RobotBase(),
+
+      measurements_in.getCVRotationMatricesEEF_Camera(),
+      measurements_in.getCVTranslationVectorsEEF_Camera(),
+
+      camera_rotation_matrix, camera_translation_vector,
       cv::CALIB_HAND_EYE_PARK);
   }
   catch (const cv::Exception& exception) {
     std::cerr << exception.what();
-
-    is_calibration_complete_ = false;
     RCLCPP_WARN(this->get_logger(), "Calibration failed, try again.");
 
-    resetMeasurements();
-
-    return;
+    return false;
   }
 
-  base2cam_frame_mat_.rotation(base2cam_rotation_matrix);
-  base2cam_frame_mat_.translation(base2cam_translation_vector);
-  cv::cv2eigen(base2cam_frame_mat_.matrix, base2cam_frame_.matrix());
+  cv::Affine3d camera_pose_robot_base {cv::Affine3d::Identity()};
 
-  is_calibration_complete_ = true;
-  measures_captured_quantity_ = 0;
+  camera_pose_robot_base.rotation(camera_rotation_matrix);
+  camera_pose_robot_base.translation(camera_translation_vector);
 
-  RCLCPP_INFO(
-    this->get_logger(), "Hand-eye calibration complete, now you can capture frames for verification");
+  cv::cv2eigen(camera_pose_robot_base.matrix, pose_out.matrix());
 
-  RCLCPP_INFO(this->get_logger(), "Estimated frame will now be broadcasted.");
+  RCLCPP_INFO(this->get_logger(), "Hand-eye calibration complete. Check your result for accuracy.");
 
+  return true;
 }
 
-void HandEyeCalibNode::broadcastBase2CameraFrame()
+void HandEyeCalibNode::broadcastFrameCamera_RobotBase(const Eigen::Affine3d& pose_in)
 {
   if (!is_calibration_complete_)
     return;
 
-  tf_static_transform_.header.stamp = this->get_clock()->now();
-  tf_static_transform_.header.frame_id = robot_base_frame_;
-  tf_static_transform_.child_frame_id = "camera";
+  geometry_msgs::msg::TransformStamped tf_static_transform {};
 
-  tf_static_transform_.transform.translation.x = base2cam_frame_.translation()(0);
-  tf_static_transform_.transform.translation.y = base2cam_frame_.translation()(1);
-  tf_static_transform_.transform.translation.z = base2cam_frame_.translation()(2);
+  tf_static_transform.header.stamp = this->get_clock()->now();
+  tf_static_transform.header.frame_id = robot_base_frame_name_;
+  tf_static_transform.child_frame_id = "camera";
 
-  Eigen::Quaterniond rotation {base2cam_frame_.rotation()};
-  tf_static_transform_.transform.rotation.w = rotation.w();
-  tf_static_transform_.transform.rotation.x = rotation.x();
-  tf_static_transform_.transform.rotation.y = rotation.y();
-  tf_static_transform_.transform.rotation.z = rotation.z();
+  tf_static_transform.transform.translation.x = pose_in.translation()(0);
+  tf_static_transform.transform.translation.y = pose_in.translation()(1);
+  tf_static_transform.transform.translation.z = pose_in.translation()(2);
 
-  tf_static_broadcaster_->sendTransform(tf_static_transform_);
+  Eigen::Quaterniond rotation {pose_in.rotation()};
+  tf_static_transform.transform.rotation.w = rotation.w();
+  tf_static_transform.transform.rotation.x = rotation.x();
+  tf_static_transform.transform.rotation.y = rotation.y();
+  tf_static_transform.transform.rotation.z = rotation.z();
+
+  tf_broadcaster_->sendTransform(tf_static_transform);
 }
 
 std::string HandEyeCalibNode::createTimeStamp()
@@ -350,12 +489,14 @@ std::string HandEyeCalibNode::createTimeStamp()
 
   std::time_t t {std::time(nullptr)};
   std::tm tm {*std::localtime(&t)};
-  timeStamp << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S");
+  timeStamp << std::put_time(&tm, "%b-%d-%y_%I:%M:%S");
 
   return timeStamp.str();
 }
 
-void HandEyeCalibNode::saveCalibrationOutput()
+void HandEyeCalibNode::saveCalibrationOutput(
+  std::ofstream& txt_file_out,
+  const Eigen::Affine3d& camera_pose_in)
 {
   if (!is_calibration_complete_) {
     RCLCPP_WARN(this->get_logger(), "Calibration is incomplete, not saving the file.");
@@ -363,72 +504,70 @@ void HandEyeCalibNode::saveCalibrationOutput()
     return;
   }
 
-  if (!std::filesystem::is_directory(workspace_dir_ + "/output/lab7"))
-    std::filesystem::create_directories(workspace_dir_ + "/output/lab7");
+  // std::string output_file_name {workspace_dir_ + "/output/lab7/Calibration-" + createTimeStamp()};
 
-  std::string output_file_name {
-    workspace_dir_ + "/output/lab7/frame-" + createTimeStamp()};
+  // cv::FileStorage output_file {output_file_name + ".yaml", cv::FileStorage::WRITE};
 
-  cv::FileStorage output_file {output_file_name + ".yaml", cv::FileStorage::WRITE};
+  // if (!output_file.isOpened()) {
+  //   RCLCPP_FATAL(this->get_logger(), "Failed to write output, unable to write a new output file.");
 
-  if (!output_file.isOpened()) {
+  //   return;
+  // }
+
+  // output_file.writeComment("\nTransformation from base to camera frame");
+  // output_file << "estimated_transformation" << base2cam_frame_mat_.matrix;
+  // output_file.release();
+
+  // std::ofstream output_file_txt {output_file_name + ".txt"};
+
+  if (!txt_file_out.is_open()) {
     RCLCPP_FATAL(this->get_logger(), "Failed to write output, unable to write a new output file.");
-
     return;
   }
 
-  output_file.writeComment("\nTransformation from base to camera frame");
-  output_file << "estimated_transformation" << base2cam_frame_mat_.matrix;
-  output_file.release();
-
-  std::ofstream output_file_txt {output_file_name + ".txt"};
-
-  if (!output_file_txt.is_open())
-    return;
-
-  output_file_txt << "Estimated Transformation Matrix: \n"
-                  << base2cam_frame_.matrix() << '\n';
+  txt_file_out << "Transformation matrix of camera frame from robot's base frame: \n"
+               << camera_pose_in.matrix() << '\n';
 
   Eigen::Vector<double, 7> pose_vector;
-  Eigen::Quaterniond rotation_q {base2cam_frame_.rotation()};
-  pose_vector << base2cam_frame_.translation(), rotation_q.coeffs();
+  Eigen::Quaterniond rotation_q {camera_pose_in.rotation()};
+  pose_vector << camera_pose_in.translation(), rotation_q.coeffs();
 
-  output_file_txt << "Estimated transform in pose vector format: \n"
-                  << pose_vector << '\n';
+  txt_file_out << "Pose vector of camera relative to robot's base frame: \n"
+               << pose_vector << '\n';
 
-  output_file_txt.close();
+  txt_file_out.close();
 }
 
-void HandEyeCalibNode::saveVerificationOutput()
-{
-  if (!is_calibration_complete_ || !is_verification_complete_) {
-    RCLCPP_WARN(this->get_logger(), "Calibration/verification is incomplete, not saving the file.");
+// void HandEyeCalibNode::saveVerificationOutput()
+// {
+//   if (!is_calibration_complete_ || !is_verification_complete_) {
+//     RCLCPP_WARN(this->get_logger(), "Calibration/verification is incomplete, not saving the file.");
 
-    return;
-  }
+//     return;
+//   }
 
-  std::string output_file_name {
-    workspace_dir_ + "/output/lab7/verification-" + createTimeStamp() + ".txt"};
+//   std::string output_file_name {
+//     workspace_dir_ + "/output/lab7/verification-" + createTimeStamp() + ".txt"};
 
-  std::ofstream output_txt {output_file_name};
+//   std::ofstream output_txt {output_file_name};
 
-  if (!output_txt.is_open()) {
-    RCLCPP_FATAL(this->get_logger(), "Failed to write output, unable to write a new output file.");
+//   if (!output_txt.is_open()) {
+//     RCLCPP_FATAL(this->get_logger(), "Failed to write output, unable to write a new output file.");
 
-    return;
-  }
+//     return;
+//   }
 
-  output_txt << "Mean error vector: \n"
-             << mean_error_vector_ << '\n' << '\n'
-             << "Covariance matrix: " << '\n'
-             << covariance_matrix_ << '\n' << '\n'
-             << "Sum of squares error vector: " << '\n'
-             << sum_of_squared_errors_vector_ << '\n' << '\n'
-             << "Root sum of squares error vector: " << '\n'
-             << root_sum_of_squared_errors_vector_ << '\n';
+//   output_txt << "Mean error vector: \n"
+//              << mean_error_vector_ << '\n' << '\n'
+//              << "Covariance matrix: " << '\n'
+//              << covariance_matrix_ << '\n' << '\n'
+//              << "Sum of squares error vector: " << '\n'
+//              << sum_of_squared_errors_vector_ << '\n' << '\n'
+//              << "Root sum of squares error vector: " << '\n'
+//              << root_sum_of_squared_errors_vector_ << '\n';
 
-  output_txt.close();
-}
+//   output_txt.close();
+// }
 
 int main(int argc, char** argv)
 {
