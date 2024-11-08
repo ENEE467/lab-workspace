@@ -43,6 +43,7 @@ void EEFPoseTracker::requestCallback(
 
     plotData();
     if (poses_csv_.is_open()) {poses_csv_.close();}
+    clearData();
     response->set__success(true);
 
     return;

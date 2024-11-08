@@ -23,6 +23,14 @@ private:
 
   void timerCallback();
   void plotData();
+
+  void clearData()
+  {
+    x_points_.clear();
+    y_points_.clear();
+    z_points_.clear();
+  }
+
   std::string createTimeStamp();
 
   bool should_track_ {false};
