@@ -4,6 +4,9 @@
 
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
+
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include "lab8/srv/track_request.hpp"
@@ -52,6 +55,13 @@ public:
   void drawSquareYZ(double side_meters = 0);
 
 private:
+  /**
+   * @brief Gets the Robot Base Position
+   *
+   * @return geometry_msgs::msg::Pose
+   */
+  geometry_msgs::msg::Pose getRobotBasePose();
+
   /**
    * @brief Plans and generates a trajectory to move to a joint-space target.
    *
@@ -115,6 +125,9 @@ private:
 
   double velocity_scaling_factor_ {0.1};
   double acceleration_scaling_factor_ {0.1};
+
+  std::unique_ptr<tf2_ros::TransformListener> tf_listener_ {nullptr};
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_ {nullptr};
 
   rclcpp::Client<lab8::srv::TrackRequest>::SharedPtr track_eef_client_ {nullptr};
 
