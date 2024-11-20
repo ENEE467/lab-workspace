@@ -21,6 +21,35 @@ UR3eMoveInterface::UR3eMoveInterface(const rclcpp::NodeOptions& node_options)
     RCLCPP_WARN(this->get_logger(), "Tracking service is unavailable, poses cannot be saved/plotted.");
 }
 
+geometry_msgs::msg::Pose UR3eMoveInterface::getRobotBasePose()
+{
+  geometry_msgs::msg::Transform transform_robot_base_world {};
+  std::string world_frame_name {"world"};
+  std::string robot_base_frame_name {move_group_interface_->getPlanningFrame()};
+
+  try {
+    transform_robot_base_world =
+      tf_buffer_->lookupTransform(
+        robot_base_frame_name, world_frame_name, tf2::TimePointZero).transform;
+  }
+  catch (const tf2::TransformException& ex) {
+    RCLCPP_WARN_STREAM(
+      this->get_logger(),
+      "Tried to transform " << world_frame_name << " to " << robot_base_frame_name  << " : "
+                            << ex.what());
+
+    return;
+  }
+
+  geometry_msgs::msg::Pose pose_out;
+  pose_out.position.x = transform_robot_base_world.translation.x;
+  pose_out.position.y = transform_robot_base_world.translation.y;
+  pose_out.position.z = transform_robot_base_world.translation.z;
+  pose_out.orientation = transform_robot_base_world.rotation;
+
+  return pose_out;
+}
+
 bool UR3eMoveInterface::planToJointSpaceGoal(
   const std::vector<double>& target_joint_positions,
   moveit::planning_interface::MoveGroupInterface::Plan& motion_plan)
