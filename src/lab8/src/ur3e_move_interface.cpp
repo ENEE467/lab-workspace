@@ -13,6 +13,9 @@ UR3eMoveInterface::UR3eMoveInterface(const rclcpp::NodeOptions& node_options)
 
   move_group_interface_->startStateMonitor(3);
 
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
   RCLCPP_INFO(this->get_logger(), "Waiting for end-effector tracking service");
   track_eef_client_ = this->create_client<lab8::srv::TrackRequest>("track_eef");
   tracking_service_available_ = track_eef_client_->wait_for_service(std::chrono::seconds(3));
