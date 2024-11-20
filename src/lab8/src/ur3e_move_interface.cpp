@@ -23,6 +23,8 @@ UR3eMoveInterface::UR3eMoveInterface(const rclcpp::NodeOptions& node_options)
 
 geometry_msgs::msg::Pose UR3eMoveInterface::getRobotBasePose()
 {
+  geometry_msgs::msg::Pose pose_out;
+
   geometry_msgs::msg::Transform transform_robot_base_world {};
   std::string world_frame_name {"world"};
   std::string robot_base_frame_name {move_group_interface_->getPlanningFrame()};
@@ -38,10 +40,9 @@ geometry_msgs::msg::Pose UR3eMoveInterface::getRobotBasePose()
       "Tried to transform " << world_frame_name << " to " << robot_base_frame_name  << " : "
                             << ex.what());
 
-    return;
+    return pose_out;
   }
 
-  geometry_msgs::msg::Pose pose_out;
   pose_out.position.x = transform_robot_base_world.translation.x;
   pose_out.position.y = transform_robot_base_world.translation.y;
   pose_out.position.z = transform_robot_base_world.translation.z;
