@@ -14,7 +14,7 @@ UR3eMoveInterface::UR3eMoveInterface(const rclcpp::NodeOptions& node_options)
   move_group_interface_->startStateMonitor(3);
 
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
   RCLCPP_INFO(this->get_logger(), "Waiting for end-effector tracking service");
   track_eef_client_ = this->create_client<lab8::srv::TrackRequest>("track_eef");
@@ -29,13 +29,13 @@ geometry_msgs::msg::Pose UR3eMoveInterface::getRobotBasePose()
   geometry_msgs::msg::Pose pose_out;
 
   geometry_msgs::msg::Transform transform_robot_base_world {};
-  std::string world_frame_name {"world"};
-  std::string robot_base_frame_name {move_group_interface_->getPlanningFrame()};
+  std::string world_frame_name {move_group_interface_->getPlanningFrame()};
+  std::string robot_base_frame_name {move_group_interface_->getLinkNames().front()};
 
   try {
     transform_robot_base_world =
       tf_buffer_->lookupTransform(
-        robot_base_frame_name, world_frame_name, tf2::TimePointZero).transform;
+        world_frame_name, robot_base_frame_name, tf2::TimePointZero).transform;
   }
   catch (const tf2::TransformException& ex) {
     RCLCPP_WARN_STREAM(
