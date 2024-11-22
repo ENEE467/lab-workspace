@@ -56,7 +56,7 @@ public:
 
 private:
   /**
-   * @brief Gets the Robot Base Position
+   * @brief Gets the robot base pose relative to world frame
    *
    * @return geometry_msgs::msg::Pose
    */
