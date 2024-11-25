@@ -72,7 +72,7 @@ void UR3eMoveInterface::drawCircleXY(double radius_meters)
 void UR3eMoveInterface::drawCircleYZ(double radius_meters)
 {
   if (radius_meters <= 0)
-    radius_meters = 0.425 * 0.5;
+    radius_meters = 0.45 * 0.5;
 
   /// TODO: Move the arm into a pose to draw the shape by setting a joint-space target
   {
