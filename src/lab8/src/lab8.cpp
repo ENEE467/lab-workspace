@@ -3,7 +3,7 @@
 void UR3eMoveInterface::drawCircleXY(double radius_meters)
 {
   if (radius_meters <= 0)
-    radius_meters = 0.425;
+    radius_meters = 0.45;
 
   double angle_offset {-M_PI_2};
 
@@ -72,7 +72,7 @@ void UR3eMoveInterface::drawCircleXY(double radius_meters)
 void UR3eMoveInterface::drawCircleYZ(double radius_meters)
 {
   if (radius_meters <= 0)
-    radius_meters = 0.45;
+    radius_meters = 0.425 * 0.5;
 
   /// TODO: Move the arm into a pose to draw the shape by setting a joint-space target
   {
@@ -138,7 +138,7 @@ void UR3eMoveInterface::drawCircleYZ(double radius_meters)
 void UR3eMoveInterface::drawSquareXY(double side_meters)
 {
   if (side_meters <= 0)
-    side_meters = (0.45 * 2) / sqrt(2);
+    side_meters = (0.45 * 2) * M_SQRT1_2;
 
   double angle_offset {-M_PI_2};
 
