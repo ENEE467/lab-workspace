@@ -1,29 +1,35 @@
-# Dev Container Setup for PCs
+# Dev Container Setup
 
-Everything from building the Docker image to starting the container is handled by the Dev Containers extension using the configuration file.
+Clone the repository in the `home/` directory without changing the name of the workspace folder.
 
-Go to this page on Read the Docs for detaled steps.
+```bash
+git clone https://github.com/ENEE467/lab-workspace.git
+```
 
-### Description
+## Building the Docker image
 
-This setup uses a multi-stage image that's minimal with core dependencies and does the project
-specific setup (like installing package dependencies) in the container instead. So the behavior with
-this setup is different from lab setup.
+Start a terminal session and change to `.devcontainer/` directory
 
-- While the image is small and simple, the container size is large. But only one container is
-  used per machine in this scenario.
+```bash
+cd ~/lab-workspace/.devcontainer
+```
 
-- The first time setup for starting the container is significantly longer since all the package
-  dependencies are installed at this stage rather than while building the image.
+Build the Docker image with the given arguments
 
-- Container *stays* on the machine and is only started/stopped during the sessions.
+```bash
+docker build \
+  --build-arg USER_UID=$(id -u) \
+  --build-arg USER_GID=$(id -g) \
+  --build-arg USERNAME=467-terp \
+  -t enee467/lab_ws_image \
+  -f 467-lab.Dockerfile \
+  .
+```
 
-However, it is flexible and quicker to add/modify the project-specific setup in the container setup
-shell script rather than the Dockerfile. The container can be easily destroyed and rebuilt to test
-the changes without touching the image.
+## Starting the Dev Container
 
-Then the finalized project-specific setup in the container setup script can be transferred to the
-lab Dockerfile and apply them to the image used on the lab computers.
+Now opening the workspace folder in VSCode with the Dev Container configuration will start the
+container named after the workspace folder.
 
-> **Note to maintainers:** Use this setup when developing/modifying the lab exercises and then
-transfer the finalized changes to the lab Docker setup.
+This page on [Read the Docs](https://enee467.readthedocs.io/en/latest/Setup.html#opening-the-workspace-in-visual-studio-code)
+describes the steps in detail.

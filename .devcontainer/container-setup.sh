@@ -17,46 +17,14 @@ then
   exit 1
 fi
 
+# Some settings for the lab camera
+printf "\n\
+v4l2-ctl -d /dev/video0 --set-ctrl focus_automatic_continuous=0\n\
+v4l2-ctl -d /dev/video0 --set-ctrl focus_absolute=0\n\
+v4l2-ctl -d /dev/video0 --set-ctrl auto_exposure=1\n\
+v4l2-ctl -d /dev/video0 --set-ctrl exposure_dynamic_framerate=0\n" >> ~/.bashrc
+
 cd $ROS_WS
-
-# Install matplot++ dependencies
-sudo apt update && sudo apt install -y \
-  libjpeg-dev \
-  libpng-dev \
-  libtiff-dev \
-  gnuplot \
-  zlib1g-dev \
-  libblas-dev \
-  liblapack-dev
-
-# Install matplot++
-if [ ! -d matplotplusplus ]
-then
-  git clone https://github.com/alandefreitas/matplotplusplus.git
-fi
-
-cd matplotplusplus
-
-if [ -d build ]
-then
-  rm -rf build
-fi
-
-# Build the library and install it
-cmake --preset=system
-cmake --build --preset=system
-sudo cmake --install build/system
-
-# Move to workspace root directory and clean up matplot++ source files
-cd $ROS_WS && rm -rf matplotplusplus
-
-# Install some ROS Packages
-sudo apt update && sudo apt install -y --no-install-recommends \
-  ros-humble-usb-cam \
-  ros-humble-aruco-opencv
-
-# Install package dependencies
-rosdep update && rosdep install --from-paths src -y --ignore-src
 
 # Clean up previous workspace build artifacts if they exist
 if [ -d build ]
@@ -80,5 +48,7 @@ colcon build --symlink-install
 # Always source the workspace and start a new session in the workspace root.
 echo "if [ -f $ROS_WS/install/setup.bash ]; then source $ROS_WS/install/setup.bash; fi" >> ~/.bashrc
 echo "if [ -d $ROS_WS ]; then cd $ROS_WS; fi" >> ~/.bashrc
+echo "export ROS_WS=$ROS_WS" >> ~/.bashrc
+echo "export ROS_LOCALHOST_ONLY=1" >> ~/.bashrc
 
 printf "\nSetup complete, workspace is now ready to use! \n"
