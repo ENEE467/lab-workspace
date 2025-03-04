@@ -86,7 +86,8 @@
     "typeindex": "cpp",
     "typeinfo": "cpp",
     "variant": "cpp",
-    "valarray": "cpp"
+    "valarray": "cpp",
+    "qtwidgets": "cpp"
   },
   "python.autoComplete.extraPaths": [
     "/home/467-terp/lab-workspace/install/lab_moveit_config/local/lib/python3.10/dist-packages",
