@@ -76,7 +76,6 @@
 				"ms-python.python",
 				"cschlosser.doxdocgen",
 				"redhat.vscode-yaml",
-				"twxs.cmake",
 				"ms-vscode.cmake-tools"
 			]
 		}
