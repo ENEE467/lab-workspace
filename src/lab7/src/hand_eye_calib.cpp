@@ -72,6 +72,9 @@ void HandEyeCalibNode::serviceCallback(
 {
   switch (request->action) {
 
+  case (lab7::srv::HandEyeCalib::Request::STATUS):
+    break;
+
   case (lab7::srv::HandEyeCalib::Request::CAPTURE):
     if (!is_calibration_complete_)
       captureCalibrationMeasure();
@@ -119,6 +122,8 @@ void HandEyeCalibNode::serviceCallback(
 
   }
 
+  response->measurements_captured = measures_captured_quantity_;
+  response->measurements_required = this->get_parameter("measurements_required").as_int();
   response->set__success(true);
 }
 
