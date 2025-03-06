@@ -4,14 +4,7 @@ namespace lab7 {
 
 HandEyeCalibPanel::HandEyeCalibPanel(QWidget * parent)
 : Panel {parent},
-  ui_ {std::make_unique<Ui::HandEyeCalibPanel>()},
-  node_ {std::make_shared<rclcpp::Node>("hand_eye_calib_panel_node")},
-
-  timer_ {node_->create_wall_timer(
-    std::chrono::seconds(2), std::bind(&HandEyeCalibPanel::checkServiceAvailability, this))},
-
-  hand_eye_calib_client_ {node_->create_client<lab7::srv::HandEyeCalib>("hand_eye_calib")},
-  service_request_ {std::make_shared<lab7::srv::HandEyeCalib::Request>()}
+  ui_ {std::make_unique<Ui::HandEyeCalibPanel>()}
 {
   ui_->setupUi(this);
 
@@ -20,12 +13,44 @@ HandEyeCalibPanel::HandEyeCalibPanel(QWidget * parent)
   connect(ui_->calibrateButton, SIGNAL(clicked()), this, SLOT(calibrate()));
   connect(ui_->saveButton, SIGNAL(clicked()), this, SLOT(save()));
 
-  service_available_ = hand_eye_calib_client_->wait_for_service(std::chrono::seconds(3));
+}
+
+void HandEyeCalibPanel::onInitialize()
+{
+  // auto node_ptr {getDisplayContext()->getRosNodeAbstraction().lock()};
+  // node_ = node_ptr->get_raw_node();
+
+  node_ = std::make_shared<rclcpp::Node>("hand_eye_calib_panel_node");
+
+  timer_cb_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  client_cb_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  timer_ =
+    node_->create_wall_timer(
+      std::chrono::seconds(2),
+      std::bind(&HandEyeCalibPanel::checkServiceAvailability, this),
+      timer_cb_group_);
+
+  hand_eye_calib_client_ =
+    node_->create_client<lab7::srv::HandEyeCalib>(
+      "hand_eye_calib",
+      rmw_qos_profile_services_default,
+      client_cb_group_);
+
+  service_request_ = std::make_shared<lab7::srv::HandEyeCalib::Request>();
+
+  executor_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+  executor_->add_node(node_);
+  spin_thread_ = std::make_unique<std::thread>( [this](){ executor_->spin(); } );
+
+  service_available_ = hand_eye_calib_client_->wait_for_service(std::chrono::seconds(1));
 
   if (service_available_)
     enablePanel();
   else
     disablePanel();
+
+  RCLCPP_INFO(node_->get_logger(), "Panel initialized!");
 }
 
 void HandEyeCalibPanel::save(rviz_common::Config config) const

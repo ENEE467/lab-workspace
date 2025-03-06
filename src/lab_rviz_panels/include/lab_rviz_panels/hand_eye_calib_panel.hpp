@@ -18,6 +18,7 @@ Q_OBJECT
 public:
   HandEyeCalibPanel(QWidget * parent = nullptr);
 
+  void onInitialize() override;
   void load(const rviz_common::Config &config) override;
   void save(rviz_common::Config config) const override;
 
@@ -41,7 +42,15 @@ private:
   std::unique_ptr<Ui::HandEyeCalibPanel> ui_ {nullptr};
 
   rclcpp::Node::SharedPtr node_ {nullptr};
+
+  rclcpp::executors::MultiThreadedExecutor::SharedPtr executor_ {nullptr};
+  std::unique_ptr<std::thread> spin_thread_ {nullptr};
+
+  rclcpp::CallbackGroup::SharedPtr timer_cb_group_ {nullptr};
+  rclcpp::CallbackGroup::SharedPtr client_cb_group_ {nullptr};
+
   rclcpp::TimerBase::SharedPtr timer_ {nullptr};
+
   rclcpp::Client<lab7::srv::HandEyeCalib>::SharedPtr hand_eye_calib_client_ {nullptr};
   lab7::srv::HandEyeCalib::Request::SharedPtr service_request_ {nullptr};
 
