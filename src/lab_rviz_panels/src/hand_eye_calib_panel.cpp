@@ -105,9 +105,6 @@ void HandEyeCalibPanel::updatePanel(const lab7::srv::HandEyeCalib::Response::Sha
 
 void HandEyeCalibPanel::checkServiceAvailability()
 {
-  if (service_available_)
-    return;
-
   service_available_ = hand_eye_calib_client_->wait_for_service(std::chrono::seconds(2));
 
   if (service_available_)
@@ -116,7 +113,7 @@ void HandEyeCalibPanel::checkServiceAvailability()
     disablePanel();
 }
 
-const lab7::srv::HandEyeCalib::Response::SharedPtr& HandEyeCalibPanel::sendServiceRequest(
+void HandEyeCalibPanel::sendServiceRequest(
   const lab7::srv::HandEyeCalib::Request::SharedPtr& request)
 {
   // if (!service_available_) {
@@ -127,17 +124,18 @@ const lab7::srv::HandEyeCalib::Response::SharedPtr& HandEyeCalibPanel::sendServi
 
   auto result_future {hand_eye_calib_client_->async_send_request(request).share()};
 
-  RCLCPP_INFO(node_->get_logger(), "Command sent, waiting for result...");
-  auto result_status {result_future.wait_for(std::chrono::seconds(1))};
+  // RCLCPP_INFO(node_->get_logger(), "Command sent, waiting for result...");
 
-  auto& response {result_future.get()};
+  // auto result_status {result_future.wait_for(std::chrono::seconds(1))};
+  result_future.wait_for(std::chrono::seconds(1));
 
-  if (response->success && result_status == std::future_status::ready)
-    RCLCPP_INFO(node_->get_logger(), "Command request fulfilled!");
-  else
-    RCLCPP_INFO(node_->get_logger(), "Command request failed to execute! Try again.");
+  auto response {result_future.get()};
+  updatePanel(response);
 
-  return response;
+  // if (response->success && result_status == std::future_status::ready)
+  //   RCLCPP_INFO(node_->get_logger(), "Command request fulfilled!");
+  // else
+  //   RCLCPP_INFO(node_->get_logger(), "Command request failed to execute! Try again.");
 }
 
 void HandEyeCalibPanel::captureFrame()

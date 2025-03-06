@@ -38,11 +38,10 @@ Q_SIGNALS:
 private:
   void enablePanel();
   void disablePanel();
-  void updatePanel(const lab7::srv::HandEyeCalib::Response::SharedPtr& response);
+  void updatePanel(const lab7::srv::HandEyeCalib::Response::SharedPtr response);
   void checkServiceAvailability();
 
-  const lab7::srv::HandEyeCalib::Response::SharedPtr& sendServiceRequest(
-    const lab7::srv::HandEyeCalib::Request::SharedPtr& request);
+  void sendServiceRequest(const lab7::srv::HandEyeCalib::Request::SharedPtr& request);
 
   bool service_available_ {false};
 
