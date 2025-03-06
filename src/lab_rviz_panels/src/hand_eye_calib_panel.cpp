@@ -141,29 +141,25 @@ void HandEyeCalibPanel::sendServiceRequest(
 void HandEyeCalibPanel::captureFrame()
 {
   service_request_->set__action(lab7::srv::HandEyeCalib::Request::CAPTURE);
-  auto& response {sendServiceRequest(service_request_)};
-  updatePanel(response);
+  sendServiceRequest(service_request_);
 }
 
 void HandEyeCalibPanel::startOver()
 {
   service_request_->set__action(lab7::srv::HandEyeCalib::Request::RESET);
-  auto& response {sendServiceRequest(service_request_)};
-  updatePanel(response);
+  sendServiceRequest(service_request_);
 }
 
 void HandEyeCalibPanel::calibrate()
 {
   service_request_->set__action(lab7::srv::HandEyeCalib::Request::CALIBRATE);
-  auto& response {sendServiceRequest(service_request_)};
-  updatePanel(response);
+  sendServiceRequest(service_request_);
 }
 
 void HandEyeCalibPanel::save()
 {
   service_request_->set__action(lab7::srv::HandEyeCalib::Request::SAVE);
-  auto& response {sendServiceRequest(service_request_)};
-  updatePanel(response);
+  sendServiceRequest(service_request_);
 }
 
 }
