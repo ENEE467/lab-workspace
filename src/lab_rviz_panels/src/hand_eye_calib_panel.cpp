@@ -13,6 +13,10 @@ HandEyeCalibPanel::HandEyeCalibPanel(QWidget * parent)
   connect(ui_->calibrateButton, SIGNAL(clicked()), this, SLOT(calibrate()));
   connect(ui_->saveButton, SIGNAL(clicked()), this, SLOT(save()));
 
+HandEyeCalibPanel::~HandEyeCalibPanel()
+{
+  spin_thread_->join();
+  executor_->cancel();
 }
 
 void HandEyeCalibPanel::onInitialize()

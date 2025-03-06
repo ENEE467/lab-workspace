@@ -17,6 +17,7 @@ class HandEyeCalibPanel : public rviz_common::Panel {
 Q_OBJECT
 public:
   HandEyeCalibPanel(QWidget * parent = nullptr);
+  ~HandEyeCalibPanel();
 
   void onInitialize() override;
   void load(const rviz_common::Config &config) override;
