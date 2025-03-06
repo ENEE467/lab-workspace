@@ -29,6 +29,12 @@ public Q_SLOTS:
   void calibrate();
   void save();
 
+Q_SIGNALS:
+  void panelDisabledChanged(bool state);
+  void statusLabelChanged(QString newLabel);
+  void framesCapturedValueChanged(int new_value);
+  void maxFramesCapturedChanged(int new_maximum);
+
 private:
   void enablePanel();
   void disablePanel();
