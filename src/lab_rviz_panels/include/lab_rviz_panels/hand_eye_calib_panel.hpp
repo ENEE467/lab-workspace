@@ -23,7 +23,7 @@ public:
   void load(const rviz_common::Config &config) override;
   void save(rviz_common::Config config) const override;
 
-private Q_SLOTS:
+public Q_SLOTS:
   void captureFrame();
   void startOver();
   void calibrate();
