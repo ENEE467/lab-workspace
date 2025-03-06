@@ -2,6 +2,7 @@
 
 #include <memory>
 
+// #include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_common/panel.hpp>
 
