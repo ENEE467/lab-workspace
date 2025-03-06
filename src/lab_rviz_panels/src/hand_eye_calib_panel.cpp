@@ -13,6 +13,17 @@ HandEyeCalibPanel::HandEyeCalibPanel(QWidget * parent)
   connect(ui_->calibrateButton, SIGNAL(clicked()), this, SLOT(calibrate()));
   connect(ui_->saveButton, SIGNAL(clicked()), this, SLOT(save()));
 
+  connect(this, SIGNAL(panelDisabledChanged(bool)), ui_->framesCapturedProgressBar, SLOT(setDisabled(bool)));
+  connect(this, SIGNAL(panelDisabledChanged(bool)), ui_->captureFrameButton, SLOT(setDisabled(bool)));
+  connect(this, SIGNAL(panelDisabledChanged(bool)), ui_->startOverButton, SLOT(setDisabled(bool)));
+  connect(this, SIGNAL(panelDisabledChanged(bool)), ui_->calibrateButton, SLOT(setDisabled(bool)));
+  connect(this, SIGNAL(panelDisabledChanged(bool)), ui_->saveButton, SLOT(setDisabled(bool)));
+
+  connect(this, SIGNAL(statusLabelChanged(QString)), ui_->statusLabel, SLOT(setText(QString)));
+  connect(this, SIGNAL(framesCapturedValueChanged(int)), ui_->framesCapturedProgressBar, SLOT(setValue(int)));
+  connect(this, SIGNAL(maxFramesCapturedChanged(int)), ui_->framesCapturedProgressBar, SLOT(setMaximum(int)));
+}
+
 HandEyeCalibPanel::~HandEyeCalibPanel()
 {
   spin_thread_->join();
@@ -69,32 +80,26 @@ void HandEyeCalibPanel::load(const rviz_common::Config &config)
 
 void HandEyeCalibPanel::enablePanel()
 {
-  ui_->statusLabel->setText("Frames Captured");
-  ui_->framesCapturedProgressBar->setDisabled(false);
-  ui_->captureFrameButton->setDisabled(false);
-  ui_->startOverButton->setDisabled(false);
-  ui_->calibrateButton->setDisabled(false);
-  ui_->saveButton->setDisabled(false);
+  Q_EMIT statusLabelChanged("Frames Captured");
+  Q_EMIT panelDisabledChanged(false);
 
   service_request_->set__action(lab7::srv::HandEyeCalib::Request::STATUS);
-  auto& response {sendServiceRequest(service_request_)};
-  updatePanel(response);
+  sendServiceRequest(service_request_);
 }
 
 void HandEyeCalibPanel::disablePanel()
 {
-  ui_->statusLabel->setText("Service Unavailable!");
-  ui_->framesCapturedProgressBar->setDisabled(true);
-  ui_->captureFrameButton->setDisabled(true);
-  ui_->startOverButton->setDisabled(true);
-  ui_->calibrateButton->setDisabled(true);
-  ui_->saveButton->setDisabled(true);
+  Q_EMIT statusLabelChanged("Service Unavailable!");
+  Q_EMIT panelDisabledChanged(true);
 }
 
-void HandEyeCalibPanel::updatePanel(const lab7::srv::HandEyeCalib::Response::SharedPtr& response)
+void HandEyeCalibPanel::updatePanel(const lab7::srv::HandEyeCalib::Response::SharedPtr response)
 {
-  ui_->framesCapturedProgressBar->setMaximum(response->measurements_required);
-  ui_->framesCapturedProgressBar->setValue(response->measurements_captured);
+  if (ui_->framesCapturedProgressBar->value() != response->measurements_captured)
+    Q_EMIT framesCapturedValueChanged(response->measurements_captured);
+
+  if (ui_->framesCapturedProgressBar->maximum() != response->measurements_required)
+    Q_EMIT maxFramesCapturedChanged(response->measurements_required);
 }
 
 void HandEyeCalibPanel::checkServiceAvailability()
