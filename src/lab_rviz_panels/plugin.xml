@@ -1,0 +1,9 @@
+<library path="hand_eye_calib_panel">
+
+  <class name="Lab 7"
+         type="lab7::HandEyeCalibPanel"
+         base_class_type="rviz_common::Panel">
+    <description>RViz Panel for Lab 7 Exercise</description>
+  </class>
+
+</library>

@@ -1,9 +1,12 @@
-int8 CAPTURE = 0
-int8 CALIBRATE = 1
-int8 VERIFY = 2
-int8 RESET = 3
-int8 SAVE = 4
+int8 STATUS = 0
+int8 CAPTURE = 1
+int8 CALIBRATE = 2
+int8 VERIFY = 3
+int8 RESET = 4
+int8 SAVE = 5
 
 int8 action
 ---
 bool success
+int8 measurements_captured
+int8 measurements_required
